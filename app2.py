@@ -14,7 +14,6 @@ DETECTIONS_JSONL = Path(BASE_DIR) / "detections.jsonl"
 MAIN_SCRIPT = os.path.join(BASE_DIR, "main.py")
 PYTHON_EXE = sys.executable
 
-# フォルダ初期化
 for d in [IMAGES_DIR, OUT_DIR]: d.mkdir(exist_ok=True)
 
 mission_running = False
@@ -25,73 +24,114 @@ def send_out_file(filename):
 
 @app.route('/')
 def dashboard():
-    mission_results = None
+    all_missions = []
+    
     if DETECTIONS_JSONL.exists():
         with open(DETECTIONS_JSONL, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-            # *** 最新の「5枚分」を1つのミッションとして集計 ***
-            if len(lines) >= 5:
-                latest_set = [json.loads(line) for line in lines[-5:]]
-                total_count = sum(item.get('person_count', 0) for item in latest_set)
-                timestamp = latest_set[0].get('timestamp', '-')
-                images = [item.get('file', '') for item in latest_set]
-                mission_results = {"time": timestamp, "total": total_count, "images": images}
+            all_data = [json.loads(line) for line in lines]
+            
+            # 5枚1セットでミッションを分割
+            for i in range(0, len(all_data), 5):
+                chunk = all_data[i : i + 5]
+                if len(chunk) < 5: continue # 5枚揃っていない回はスキップ
+                
+                mission_info = {
+                    "id": i // 5 + 1,
+                    "time": chunk[0].get('timestamp', '-'),
+                    "total": sum(item.get('person_count', 0) for item in chunk),
+                    "images": [item.get('file', '') for item in chunk]
+                }
+                all_missions.append(mission_info)
+
+    # 履歴を新しい順（降順）に並べ替え
+    all_missions.reverse()
+    
+    latest_mission = all_missions[0] if all_missions else None
+    past_missions = all_missions[1:] if len(all_missions) > 1 else []
 
     return render_template_string("""
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8"><title>Drone AI Report</title>
+    <meta charset="UTF-8"><title>Drone Mission History</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: sans-serif; text-align: center; padding: 20px; }
-        .container { max-width: 900px; margin: auto; }
-        .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 30px; margin-bottom: 20px; }
-        .total-count { font-size: 72px; color: #00ffcc; font-weight: bold; margin: 10px 0; }
-        .image-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 30px; }
-        .img-item { background: #000; border: 1px solid #444; border-radius: 8px; overflow: hidden; }
-        .img-item img { width: 100%; height: auto; display: block; }
-        .btn { background: #00ffcc; color: #0d1117; padding: 20px 60px; font-weight: bold; border: none; border-radius: 10px; cursor: pointer; font-size: 20px; }
-        .btn:disabled { background: #444; color: #888; }
+        .container { max-width: 1000px; margin: auto; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 25px; margin-bottom: 30px; }
+        .total-count { font-size: 64px; color: #00ffcc; font-weight: bold; }
+        .image-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 20px; }
+        .img-item { background: #000; border: 1px solid #444; border-radius: 4px; overflow: hidden; }
+        .img-item img { width: 100%; aspect-ratio: 4/3; object-fit: cover; }
+        
+        .history-section { text-align: left; margin-top: 50px; border-top: 1px solid #30363d; padding-top: 20px; }
+        .history-item { background: #0d1117; border: 1px solid #30363d; margin-bottom: 10px; padding: 15px; border-radius: 8px; }
+        .history-header { display: flex; justify-content: space-between; cursor: pointer; }
+        .btn { background: #00ffcc; color: #0d1117; padding: 15px 40px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; font-size: 18px; }
+        .btn:disabled { background: #444; }
+        .badge { background: #00ffcc22; color: #00ffcc; padding: 2px 8px; border-radius: 4px; font-size: 14px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🚁 有人検知ミッション・レポート</h1>
-        {% if mission %}
+        <h1>🚁 ドローン有人検知アーカイブ</h1>
+
+        {% if latest %}
         <div class="card">
-            <h3 style="color:#888;">ミッション完了時刻: {{ mission.time }}</h3>
-            <div style="font-size: 24px;">今回の合計検出人数</div>
-            <div class="total-count">{{ mission.total }} 名</div>
+            <h2 style="color:#888; margin:0;">Latest Mission: {{ latest.time }}</h2>
+            <div style="margin-top:10px;">合計検出人数: <span class="total-count">{{ latest.total }} 名</span></div>
             <div class="image-grid">
-                {% for img in mission.images %}
-                <div class="img-item">
-                    <img src="/out/{{ img }}">
-                    <div style="font-size:11px; padding:5px;">{{ img }}</div>
-                </div>
+                {% for img in latest.images %}
+                <div class="img-item"><img src="/out/{{ img }}"></div>
                 {% endfor %}
             </div>
         </div>
-        {% else %}
-        <div class="card"><p>まだ解析データがありません。</p></div>
         {% endif %}
-        <button id="btn" class="btn" onclick="start()">MISSION START</button>
-        <p id="status" style="margin-top:20px; color:#f1c40f;"></p>
+
+        <button id="btn" class="btn" onclick="start()">NEW MISSION START</button>
+        <p id="status" style="color: #f1c40f;"></p>
+
+        <div class="history-section">
+            <h3>過去のミッション履歴 ({{ past|length }}件)</h3>
+            {% for m in past %}
+            <div class="history-item">
+                <div class="history-header" onclick="toggle('m{{m.id}}')">
+                    <span><b>Mission #{{ m.id }}</b> - {{ m.time }}</span>
+                    <span><span class="badge">{{ m.total }}名検知</span> ▼</span>
+                </div>
+                <div id="m{{m.id}}" style="display:none; margin-top:15px;">
+                    <div class="image-grid">
+                        {% for img in m.images %}
+                        <div class="img-item"><img src="/out/{{ img }}"></div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
     </div>
+
     <script>
+        function toggle(id) {
+            const el = document.getElementById(id);
+            el.style.display = el.style.display === 'none' ? 'grid' : 'none';
+        }
+
         async function start() {
-            if(!confirm('飛行を開始しますか？')) return;
-            document.getElementById('btn').disabled = true;
-            document.getElementById('status').innerText = '⚠️ 実行中... 完了までブラウザを閉じないでください。';
+            if(!confirm('ミッションを開始しますか？')) return;
+            const btn = document.getElementById('btn');
+            btn.disabled = true;
+            document.getElementById('status').innerText = '⚠️ ミッション実行中... 完了までお待ちください。';
             const res = await fetch('/start-mission');
             if(res.ok) {
-                alert('ミッション開始。約2〜3分後に自動で更新されます。');
-                setTimeout(() => location.reload(), 150000); 
+                alert('開始しました。完了後にリロードします。');
+                setTimeout(() => location.reload(), 150000);
             }
         }
     </script>
 </body>
 </html>
-""", mission=mission_results)
+""", latest=latest_mission, past=past_missions)
 
 def thread_task():
     global mission_running
