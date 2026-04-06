@@ -13,7 +13,7 @@ CAMPUS_PROFILE = "Rits-1Xauth"     # 学内WiFiのプロファイル名
 
 PYTHON_EXE = sys.executable
 
-MOVE_SCRIPT = "drone_move.py"      # ← 修正済み
+MOVE_SCRIPT = "drone_move-shot.py"      # ← 修正済み
 MOVE_ARGS = ["--mission"]          # ["--mission"] or ["--auto"] など
 
 SCAN_SCRIPT = "scan3.py"
@@ -158,11 +158,11 @@ def main():
     print("=== STEP 1, switch WiFi to TELLO ===")
     ok = connect_wifi_windows(TELLO_PROFILE)
     if not ok:
-        print("[ABORT] cannot connect to TELLO wifi, so drone_move.py will NOT run.")
+        print("[ABORT] cannot connect to TELLO wifi, so drone_move-shot.py will NOT run.")
         return
 
-    print("=== STEP 2, run drone_move.py ===")
-    # drone_move.pyはTELLO接続が前提
+    print("=== STEP 2, run drone_move-shot.py ===")
+    # drone_move-shot.pyはTELLO接続が前提
     run_python_script(MOVE_SCRIPT, MOVE_ARGS)
 
     print("=== STEP 3, switch WiFi back to campus ===")
