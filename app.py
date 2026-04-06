@@ -29,37 +29,72 @@ def dashboard():
     rows = ""
     # 最新50件を表示
     for r in reversed(records[-50:]):
-        t = r.get('timestamp', r.get('time', '不明'))
-        count = r.get('person_count', r.get('count', '?'))
-        rows += f"<tr><td>{t}</td><td>{count} 人</td></tr>"
+        frame_id = r.get('frame_id', '?')
+        person_ids = r.get('person_ids', [])
+        count = len(person_ids) if isinstance(person_ids, list) else '?'
+        rows += f"<tr><td>Frame {frame_id}</td><td>{count} 人</td></tr>"
     
+    # 最新検出数を取得（テーブルには載せているが、別途ページ上部に表示するため）
+    latest_count = None
+    if records:
+      last = records[-1]
+      person_ids = last.get('person_ids', [])
+      latest_count = len(person_ids) if isinstance(person_ids, list) else None
+    
+    # 合計の一意な人数を集計（全フレーム通して）
+    total_unique_people = set()
+    for r in records:
+      person_ids = r.get('person_ids', [])
+      if isinstance(person_ids, list):
+        total_unique_people.update(person_ids)
+    total_count = len(total_unique_people)
+
+    # 最新画像のファイルを探す
+    latest_image = None
+    try:
+      import glob
+      img_files = glob.glob(os.path.join(BASE_DIR, 'out', '*_detid.jpg'))
+      if img_files:
+        img_files.sort(key=lambda x: os.path.getmtime(x))
+        latest_image = os.path.relpath(img_files[-1], BASE_DIR).replace('\\','/')
+    except Exception:
+      latest_image = None
     return render_template_string("""
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <title>研究室 人数検出</title>
-  <style>
-    body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; background: #f5f5f5; }
-    h1 { color: #333; }
-    button { padding: 12px 24px; font-size: 16px; background: #1a1a1a; color: white; border: none; border-radius: 8px; cursor: pointer; margin: 8px 0; }
-    button:disabled { background: #888; }
-    #status { margin: 12px 0; padding: 10px 16px; border-radius: 8px; background: #e0f0ff; min-height: 20px; }
-    table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-top: 24px; }
-    th { background: #1a1a1a; color: white; padding: 10px 16px; text-align: left; }
-    td { padding: 10px 16px; border-bottom: 1px solid #eee; }
-    tr:last-child td { border-bottom: none; }
-  </style>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <h1>🚁 研究室 人数検出ダッシュボード</h1>
+  
+  <div class="stats-container">
+    <div class="stat-card total">
+      <div class="stat-label">合計検出人数（全フレーム）</div>
+      <div class="stat-value">{{ total_count }}</div>
+    </div>
+    <div class="stat-card latest">
+      <div class="stat-label">最新フレーム検出人数</div>
+      <div class="stat-value">{{ latest_count if latest_count is not none else '0' }}</div>
+    </div>
+  </div>
+  
+  {% if latest_image %}
+  <div class="image-container">
+    <strong>最新検出画像:</strong>
+    <img src="/{{ latest_image }}" />
+  </div>
+  {% endif %}
+  
   <button id="btn" onclick="startMission()">ドローン飛行開始</button>
   <div id="status">待機中</div>
 
   <h2>最新の検出履歴</h2>
   <table>
     <thead>
-        <tr><th>日時</th><th>検出人数</th></tr>
+        <tr><th>フレーム</th><th>検出人数</th></tr>
     </thead>
     <tbody>
         """ + (rows if rows else "<tr><td colspan='2'>データがありません</td></tr>") + """
@@ -82,7 +117,12 @@ def dashboard():
         const data = await res.json();
 
         if (data.status === 'success') {
-          status.textContent = 'ミッション完了！ページを更新して結果を確認してください。';
+          // 結果に人数があれば表示
+          if (data.latest_count !== undefined) {
+            status.textContent = `ミッション完了！検出人数: ${data.latest_count}人。ページを更新して履歴を確認してください。`;
+          } else {
+            status.textContent = 'ミッション完了！ページを更新して結果を確認してください。';
+          }
           status.style.background = '#d4edda';
           setTimeout(() => location.reload(), 3000); // 3秒後に自動更新
         } else {
@@ -99,7 +139,7 @@ def dashboard():
   </script>
 </body>
 </html>
-""")
+""", latest_image=latest_image, latest_count=latest_count, total_count=total_count, rows=rows)
 
 @app.route('/start-mission', methods=['GET', 'POST'])
 def start_mission():
@@ -113,13 +153,28 @@ def start_mission():
             capture_output=True,
             text=True
         )
+        # ミッション後に最新の検出人数を取得
+        latest_count = None
+        if DETECTIONS_JSONL.exists():
+          try:
+            with open(DETECTIONS_JSONL, "r", encoding="utf-8") as f:
+              lines = [l.strip() for l in f if l.strip()]
+            if lines:
+              last = json.loads(lines[-1])
+              person_ids = last.get('person_ids', [])
+              latest_count = len(person_ids) if isinstance(person_ids, list) else None
+          except Exception:
+            latest_count = None
 
         if result.returncode == 0:
-            return jsonify({
-                "status": "success",
-                "message": "Mission completed successfully",
-                "output": result.stdout
-            })
+          resp = {
+            "status": "success",
+            "message": "Mission completed successfully",
+            "output": result.stdout,
+          }
+          if latest_count is not None:
+            resp["latest_count"] = latest_count
+          return jsonify(resp)
         else:
             return jsonify({
                 "status": "error",
