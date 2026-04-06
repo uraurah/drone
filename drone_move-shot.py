@@ -181,14 +181,14 @@ def move_with_midpoint(direction: str, total_cm: int, midpoint_cm: int = 600, pr
         move_distance(direction, remaining, settle_sec=settle_sec)
 
 
+# ...existing code...
 def perform_mission(height_cm: int = 100, seg_cm: int = 250, settle_sec: float = 1.2):
     """
     離陸 → 1m上昇 → 撮影
     → 2.5m左 → 停止して撮影
     → 2.5m左
-    → 45度左回転×4（合計180度）
-    → 2.5m左 → 停止して撮影
-    → 2.5m左
+    → 45度左回転×2（合計90度）
+    → 5.0m後ろ
     → 着陸
     """
     global running
@@ -202,57 +202,42 @@ def perform_mission(height_cm: int = 100, seg_cm: int = 250, settle_sec: float =
 
     # 離陸 & 上昇
     send("takeoff", wait=4.5)
-    # 明確なホバリング: 上昇前に2秒停止
     time.sleep(2.0)
     send(f"up {height_cm}", wait=3.0)
 
-    # 上昇直後は明確に2秒停止してから撮影①（上昇後）
+    # 上昇後撮影
     time.sleep(2.0)
     time.sleep(settle_sec)
     save_current_frame(prefix="mission_start")
 
-    # 2.5m左 → 撮影②
+    # 1回目の左移動 → 撮影
     move_distance("left", seg_cm, settle_sec=settle_sec)
-    # 区間完了後は明確に2秒停止して撮影
     time.sleep(2.0)
     save_current_frame(prefix="mission_step1")
 
-    # 2.5m左（撮影なし）
-    time.sleep(2.0)  # 明確な停止: 2秒間ホバリング
-    move_distance("left", seg_cm, settle_sec=settle_sec)
-    # 移動後に2秒停止
+    # 2回目の左移動（撮影なし→移動完了後撮影）
     time.sleep(2.0)
-    # 撮影②：2回目の左移動後にその場で撮影
+    move_distance("left", seg_cm, settle_sec=settle_sec)
+    time.sleep(2.0)
     save_current_frame(prefix="mission_step2")
 
-    # 45度左回転×4
-    for i in range(4):
+    # 45度左回転 × 2 (合計90度)
+    for i in range(2):
         if not running:
             break
         send("ccw 45", wait=2.0)
-        # 回転後は明確に2秒停止
         time.sleep(2.0)
-        # 各回転後に撮影
         save_current_frame(prefix=f"mission_rot{i+1:02d}")
 
-    # 2.5m左 → 撮影③
-    move_distance("left", seg_cm, settle_sec=settle_sec)
-    # 区間完了後は明確に2秒停止して撮影
+    # 5.0m 後退
+    move_distance("back", 500, settle_sec=settle_sec)
     time.sleep(2.0)
-    save_current_frame(prefix="mission_step3")
-
-    # 2.5m左（撮影なし）
-    move_distance("left", seg_cm, settle_sec=settle_sec)
-    # 最終移動後に明確に2秒停止してから着陸
-    time.sleep(2.0)
-    # 着陸前に撮影
-    time.sleep(settle_sec)
-    save_current_frame(prefix="mission_before_land")
+    save_current_frame(prefix="mission_after_back")
 
     # 着陸
     send("land", wait=3.0)
     print("===== Mission END =====")
-
+# ...existing code...
 
 
 def preview_window():
